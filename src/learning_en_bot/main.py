@@ -10,8 +10,8 @@ from aiogram.types.bot_command import BotCommand
 
 from src.config import get_config
 from src.learning_en_bot.buttons.keyboards import get_main_menu
+from src.learning_en_bot.database import WordDatabase
 from src.learning_en_bot.handlers import register_all_handlers
-
 
 
 logging.basicConfig(
@@ -25,6 +25,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Глобальная переменная для БД
+db: WordDatabase = None
 
 async def cmd_start(message: types.Message) -> None:
     """Обработчик команды /start"""
@@ -79,12 +81,23 @@ async def button_add_photo(message: types.Message) -> None:
 async def button_my_words(message: types.Message) -> None:
     """Обработчик кнопки 'Мои слова'"""
     logger.info(f"User {message.from_user.id} clicked 'My words'")
-    await message.answer(
-        "📖 <b>Твои слова:</b>\n\n"
-        "Пока нет добавленных слов.\n"
-        "Нажми '➕ Добавить слово' чтобы начать!",
-        parse_mode="HTML"
-    )
+    
+    words = db.get_user_words(message.from_user.id)
+    word_count = len(words)
+    
+    if word_count == 0:
+        await message.answer(
+            "📖 <b>Твои слова:</b>\n\n"
+            "Пока нет добавленных слов.\n"
+            "Нажми '➕ Добавить слово' чтобы начать!",
+            parse_mode="HTML"
+        )
+    else:
+        words_text = "\n".join([f"<code>{en}</code> - <code>{ru}</code>" for en, ru in words])
+        await message.answer(
+            f"📖 <b>Твои слова ({word_count}):</b>\n\n{words_text}",
+            parse_mode="HTML"
+        )
 
 
 async def button_reminders(message: types.Message) -> None:
@@ -101,12 +114,14 @@ async def button_reminders(message: types.Message) -> None:
 async def button_stats(message: types.Message) -> None:
     """Обработчик кнопки 'Статистика'"""
     logger.info(f"User {message.from_user.id} clicked 'Stats'")
+    word_count = db.get_user_word_count(message.from_user.id)
+    
     await message.answer(
-        "📊 <b>Твоя статистика</b>\n\n"
-        "📝 Слов добавлено: 0\n"
-        "🔄 Повторений: 0\n"
-        "🎯 Уровень: новичок\n\n"
-        "Добавляй слова чтобы улучшить статистику!",
+        f"📊 <b>Твоя статистика</b>\n\n"
+        f"📝 Слов добавлено: {word_count}\n"
+        f"🔄 Повторений: 0\n"
+        f"🎯 Уровень: новичок\n\n"
+        f"Добавляй слова чтобы улучшить статистику!",
         parse_mode="HTML"
     )
 
@@ -121,18 +136,26 @@ async def handle_text(message: types.Message) -> None:
     """Обработчик обычных текстовых сообщений (добавление слов)"""
     logger.info(f"User {message.from_user.id} sent: {message.text}")
     
-    # Проверяем формат: "слово - перевод"
     if " - " in message.text:
         parts = message.text.split(" - ", 1)
         word = parts[0].strip()
         translation = parts[1].strip()
         
-        await message.answer(
-            f"✅ <b>Слово добавлено!</b>\n\n"
-            f"📝 <code>{word}</code> - <code>{translation}</code>\n\n"
-            f"Это слово сохранено для повторения!",
-            parse_mode="HTML"
-        )
+        success = db.add_word(message.from_user.id, word, translation)
+        
+        if success:
+            await message.answer(
+                f"✅ <b>Слово добавлено!</b>\n\n"
+                f"📝 <code>{word}</code> - <code>{translation}</code>\n\n"
+                f"Это слово сохранено для повторения!",
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer(
+                f"⚠️ <b>Слово уже есть в списке!</b>\n\n"
+                f"📝 <code>{word}</code> - <code>{translation}</code>",
+                parse_mode="HTML"
+            )
     else:
         await message.answer(
             "❌ Неправильный формат!\n\n"
@@ -152,9 +175,10 @@ async def set_commands(bot: Bot) -> None:
     await bot.set_my_commands(commands)
     logger.info("✅ Bot commands set")
 
-
 async def main() -> None:
     """Главная функция бота"""
+    
+    global db
     
     logger.info("🤖 Starting bot initialization...")
     
@@ -165,6 +189,11 @@ async def main() -> None:
         logger.info("✅ Configuration loaded successfully")
         logger.info(f"Bot username: {config.bot_username}")
         logger.info(f"Database path: {config.database_path}")
+
+        # Инициализируем БД
+        logger.info("Initializing database...")
+        db = WordDatabase(config.database_path)
+        logger.info("✅ Database initialized")
 
         # Инициализируем бота
         logger.info("Creating Bot instance...")
@@ -185,7 +214,7 @@ async def main() -> None:
         dispatcher.message.register(cmd_start, Command("start"))
         dispatcher.message.register(cmd_help, Command("help"))
         
-        # Регистрируем обработчики кнопок (ВАЖНО: порядок имеет значение!)
+        # Регистрируем обработчики кнопок
         dispatcher.message.register(button_add_word, lambda msg: msg.text == "➕ Добавить слово")
         dispatcher.message.register(button_add_photo, lambda msg: msg.text == "📸 Добавить фото")
         dispatcher.message.register(button_my_words, lambda msg: msg.text == "📖 Мои слова")
@@ -193,10 +222,10 @@ async def main() -> None:
         dispatcher.message.register(button_stats, lambda msg: msg.text == "📊 Статистика")
         dispatcher.message.register(button_help, lambda msg: msg.text == "❓ Помощь")
         
-        # Обработчик для обычных текстовых сообщений (ДОЛЖЕН БЫТЬ В КОНЦЕ!)
+        # Обработчик для текстовых сообщений
         dispatcher.message.register(handle_text)
         
-        # Регистрируем остальные обработчики (из модуля handlers)
+        # Регистрируем остальные обработчики
         register_all_handlers(dispatcher)
         logger.info("✅ Handlers registered")
 
