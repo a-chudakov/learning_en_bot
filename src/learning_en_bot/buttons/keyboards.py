@@ -20,4 +20,3 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         one_time_keyboard=False,
     )
     return keyboard
-```
