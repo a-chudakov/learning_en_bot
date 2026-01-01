@@ -101,14 +101,43 @@ async def button_my_words(message: types.Message) -> None:
 
 
 async def button_reminders(message: types.Message) -> None:
-    """Обработчик кнопки 'Напоминания'"""
+    """Обработчик кнопки 'Напоминания' - показывает меню режимов"""
     logger.info(f"User {message.from_user.id} clicked 'Reminders'")
-    await message.answer(
-        "🔔 <b>Напоминания</b>\n\n"
-        "Уведомления отключены.\n"
-        "Добавь слова чтобы включить напоминания!",
-        parse_mode="HTML"
+    
+    from src.learning_en_bot.reminders import ReminderSystem
+    reminder_system = ReminderSystem(db)
+    
+    # Получаем рекомендацию
+    recommended_mode = reminder_system.get_reminder_mode_recommendation(message.from_user.id)
+    
+    # Кнопки для выбора режима
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📝 Новые слова (MODE 1)")],
+            [KeyboardButton(text="🔄 Старые слова (MODE 2)")],
+            [KeyboardButton(text="⚡ Сложные слова (MODE 2+)")],
+            [KeyboardButton(text="🎯 Комбинированно (MIX)")],
+            [KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
     )
+    
+    mode_text = {
+        "mode_1_recent": "🔥 РЕКОМЕНДУЕМ: Новые слова",
+        "mode_2_old": "🔥 РЕКОМЕНДУЕМ: Старые слова",
+        "mode_2_difficult": "🔥 РЕКОМЕНДУЕМ: Сложные слова",
+        "no_words": "❌ Нет добавленных слов"
+    }
+    
+    await message.answer(
+        f"🔔 <b>НАПОМИНАНИЯ</b>\n\n"
+        f"{mode_text.get(recommended_mode, '...')}\n\n"
+        f"Выбери режим повторения:",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
 
 
 async def button_stats(message: types.Message) -> None:
