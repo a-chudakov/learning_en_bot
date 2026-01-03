@@ -5,7 +5,6 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="➕ Добавить слово"),
-                KeyboardButton(text="📸 Добавить фото"),
             ],
             [
                 KeyboardButton(text="📖 Мои слова"),

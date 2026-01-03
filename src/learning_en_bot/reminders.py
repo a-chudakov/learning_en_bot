@@ -1,8 +1,7 @@
-import logging
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from aiogram.types import ReplyKeyboardMarkup
 from src.learning_en_bot.database import WordDatabase
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class ReminderSystem:
@@ -117,3 +116,48 @@ class ReminderSystem:
             message += "⏳ Продолжай добавлять слова для лучшего обучения"
         
         return message
+
+    def get_morning_reminder_message(self, user_id: int) -> Tuple[str, Optional[ReplyKeyboardMarkup]]:
+        """Получить сообщение с утренними напоминаниями (5 случайных слов)"""
+        words = self.db.get_random_words(user_id, limit=5)
+        
+        if not words:
+            return ("🌅 <b>УТРЕННИЕ НАПОМИНАНИЯ</b>\n\n❌ Нет слов для повторения.", None)
+        
+        words_lines = []
+        for i, (en, ru, trans, topic) in enumerate(words, 1):
+            trans_part = f" [{trans}]" if trans else ""
+            topic_part = f" ({topic})" if topic else ""
+            words_lines.append(f"<code>{i}.</code> <b>{en}</b>{trans_part} - {ru}{topic_part}")
+        
+        words_text = "\n".join(words_lines)
+        
+        message = (
+            f"🌅 <b>УТРЕННИЕ НАПОМИНАНИЯ</b>\n\n"
+            f"Пора повторить слова! ☀️\n\n"
+            f"{words_text}"
+        )
+        return (message, None)
+    
+    def get_evening_reminder_message(self, user_id: int) -> Tuple[str, Optional[ReplyKeyboardMarkup]]:
+        """Получить сообщение с вечерними напоминаниями (5 случайных слов)"""
+        words = self.db.get_random_words(user_id, limit=5)
+        
+        if not words:
+            return ("🌙 <b>ВЕЧЕРНИЕ НАПОМИНАНИЯ</b>\n\n❌ Нет слов для повторения.", None)
+        
+        words_lines = []
+        for i, (en, ru, trans, topic) in enumerate(words, 1):
+            trans_part = f" [{trans}]" if trans else ""
+            topic_part = f" ({topic})" if topic else ""
+            words_lines.append(f"<code>{i}.</code> <b>{en}</b>{trans_part} - {ru}{topic_part}")
+        
+        words_text = "\n".join(words_lines)
+        
+        message = (
+            f"🌙 <b>ВЕЧЕРНИЕ НАПОМИНАНИЯ</b>\n\n"
+            f"Время повторить слова! 🌙\n\n"
+            f"{words_text}"
+        )
+        return (message, None)
+

@@ -39,3 +39,4 @@ logs/
 .cache/
 .coverage
 htmlcov/
+IMPROVEMENTS.md
