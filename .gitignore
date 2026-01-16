@@ -40,3 +40,9 @@ logs/
 .coverage
 htmlcov/
 IMPROVEMENTS.md
+
+# Внутренние документы (не для пользователей GitHub)
+CODE_REVIEW.md
+CHANGELOG*.md
+*.md.bak
+*.tmp.md

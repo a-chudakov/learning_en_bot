@@ -8,7 +8,11 @@ def get_main_menu() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="📖 Мои слова"),
+                KeyboardButton(text="🎯 Тренировка"),
+            ],
+            [
                 KeyboardButton(text="🔔 Напоминания"),
+                KeyboardButton(text="⚙️ Настройки"),
             ],
             [
                 KeyboardButton(text="📊 Статистика"),
