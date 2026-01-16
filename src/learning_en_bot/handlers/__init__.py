@@ -2,9 +2,8 @@
 Регистрация всех обработчиков
 """
 
-from aiogram import Dispatcher
+from aiogram import Dispatcher, F
 from aiogram.filters.command import Command
-from aiogram.filters import F
 from aiogram.fsm.context import FSMContext
 
 from src.learning_en_bot.handlers import commands, words, quiz, reminders, settings, callbacks
@@ -38,7 +37,6 @@ def register_all_handlers(
     # Главное меню - слова
     dp.message.register(words_handler.button_add_word, lambda msg: msg.text == "➕ Добавить слово")
     dp.message.register(words_handler.button_my_words, lambda msg: msg.text == "📖 Мои слова")
-    dp.message.register(words_handler.handle_text)  # Обработка добавления слов (fallback)
     
     # Главное меню - тренировка
     dp.message.register(quiz_handler.button_quiz_menu, lambda msg: msg.text == "🎯 Тренировка")
@@ -52,11 +50,12 @@ def register_all_handlers(
         lambda msg: msg.text in ["🎯 Умная тренировка (SRS)", "🎲 Случайные слова", "⚡ Сложные слова", "✨ Новые слова"]
     )
     
-    # Главное меню - напоминания
+    # Главное меню - напоминания (просто показывает 5 случайных слов)
     dp.message.register(reminders_handler.button_reminders, lambda msg: msg.text == "🔔 Напоминания")
-    dp.message.register(reminders_handler.button_morning_reminders, lambda msg: msg.text == "🌅 Утренние")
-    dp.message.register(reminders_handler.button_evening_reminders, lambda msg: msg.text == "🌙 Вечерние")
     dp.message.register(reminders_handler.button_stats, lambda msg: msg.text == "📊 Статистика")
+    
+    # Главное меню - помощь
+    dp.message.register(commands.cmd_help, lambda msg: msg.text == "❓ Помощь")
     
     # Главное меню - настройки
     dp.message.register(settings_handler.button_settings, lambda msg: msg.text == "⚙️ Настройки")
@@ -70,7 +69,7 @@ def register_all_handlers(
     )
     dp.message.register(settings_handler.toggle_reminders, lambda msg: msg.text == "🔔 Вкл/Выкл напоминания")
     
-    # FSM обработчики для настроек
+    # FSM обработчики для настроек (регистрируем до общего текстового handler)
     dp.message.register(
         settings_handler.handle_morning_time,
         ReminderStates.waiting_for_morning_time
@@ -89,3 +88,7 @@ def register_all_handlers(
     
     # Пагинация
     dp.callback_query.register(callbacks_handler.handle_page_callback, F.data.startswith("page_"))
+    
+    # ВСЕГДА ПОСЛЕДНИМ - обработка добавления слов (fallback для текстовых сообщений)
+    # Это должно быть в самом конце, чтобы не перехватывать кнопки и команды
+    dp.message.register(words_handler.handle_text)

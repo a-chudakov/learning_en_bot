@@ -89,7 +89,8 @@ class Paginator:
         
         return text, keyboard
     
-    def format_word(self, word_tuple: Tuple[str, str, str, str], index: int) -> str:
+    @staticmethod
+    def format_word(word_tuple: Tuple[str, str, str, str], index: int) -> str:
         """Форматирование слова для пагинатора"""
         english, russian, transcription, topic = word_tuple
         trans_part = f" [{transcription}]" if transcription else ""

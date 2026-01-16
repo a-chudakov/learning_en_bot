@@ -1,7 +1,9 @@
 """
-Сервис для интерактивной тренировки/викторины
+Сервис для интерактивной тренировки/викторины с вариантами ответа
 """
 
+import random
+import json
 from typing import List, Tuple, Optional, Dict
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from loguru import logger
@@ -10,13 +12,87 @@ from src.learning_en_bot.services.srs_service import SRSService
 
 
 class QuizService:
-    """Сервис для управления викториной"""
+    """Сервис для управления викториной с вариантами ответа"""
     
     def __init__(self, db: WordDatabase, srs_service: SRSService):
         self.db = db
         self.srs_service = srs_service
-        # Храним активные сессии: {user_id: {'words': [...], 'current_index': 0, 'correct': 0, 'total': 0}}
+        # Храним активные сессии: {user_id: {'words': [...], 'current_index': 0, 'correct': 0, 'total': 0, 'state': 'question'/'result'}}
         self.active_sessions: Dict[int, Dict] = {}
+    
+    def _generate_wrong_options(
+        self,
+        user_id: int,
+        correct_translation: str,
+        count: int = 3
+    ) -> List[str]:
+        """
+        Сгенерировать неправильные варианты ответа
+        
+        Args:
+            user_id: ID пользователя
+            correct_translation: Правильный перевод (чтобы исключить)
+            count: Количество неправильных вариантов
+        
+        Returns:
+            List неправильных переводов
+        """
+        # Получаем все переводы пользователя
+        all_words = self.db.get_user_words(user_id)
+        all_translations = [word[1] for word in all_words if word[1] != correct_translation]
+        
+        # Если недостаточно вариантов, используем стандартные
+        if len(all_translations) < count:
+            # Добавляем стандартные неправильные варианты
+            standard_wrong = ["дом", "дерево", "вода", "книга", "стол", "окно", "рука", "нога"]
+            standard_wrong = [w for w in standard_wrong if w != correct_translation]
+            all_translations.extend(standard_wrong[:count - len(all_translations)])
+        
+        # Берём случайные неправильные варианты
+        if len(all_translations) >= count:
+            wrong_options = random.sample(all_translations, count)
+        else:
+            wrong_options = all_translations
+        
+        return wrong_options
+    
+    def _encode_callback_data(self, word: str, user_id: int, choice_index: int = None) -> str:
+        """
+        Закодировать данные для callback_data (используем JSON для надёжности)
+        
+        Args:
+            word: Английское слово
+            user_id: ID пользователя
+            choice_index: Индекс выбранного варианта (для ответа)
+        
+        Returns:
+            Закодированная строка для callback_data
+        """
+        data = {
+            'word': word,
+            'user_id': user_id
+        }
+        if choice_index is not None:
+            data['choice'] = choice_index
+        return json.dumps(data)
+    
+    def _decode_callback_data(self, callback_data: str) -> Optional[Dict]:
+        """Декодировать callback_data"""
+        try:
+            if callback_data.startswith('quiz_'):
+                # Старый формат для обратной совместимости
+                parts = callback_data.split("||", 2)
+                if len(parts) >= 3:
+                    prefix = parts[0]
+                    word = parts[1]
+                    user_id = int(parts[2])
+                    return {'prefix': prefix, 'word': word, 'user_id': user_id}
+            else:
+                # Новый формат JSON
+                return json.loads(callback_data)
+        except Exception as e:
+            logger.error(f"❌ Error decoding callback_data: {e}")
+            return None
     
     def start_quiz(
         self,
@@ -63,7 +139,8 @@ class QuizService:
                 'current_index': 0,
                 'correct': 0,
                 'total': len(words),
-                'mode': mode
+                'mode': mode,
+                'state': 'question'  # 'question' или 'result'
             }
             
             # Показываем первое слово
@@ -79,7 +156,7 @@ class QuizService:
     
     def show_current_word(self, user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
         """
-        Показать текущее слово в викторине
+        Показать текущее слово в викторине с вариантами ответа
         
         Returns:
             Tuple[message_text, keyboard]
@@ -94,7 +171,7 @@ class QuizService:
         session = self.active_sessions[user_id]
         words = session['words']
         current_index = session['current_index']
-        correct = session['correct']
+        correct_count = session['correct']
         total = session['total']
         
         if current_index >= len(words):
@@ -106,40 +183,67 @@ class QuizService:
         topic_part = f" <i>({topic})</i>" if topic else ""
         
         progress = f"{current_index + 1}/{total}"
-        correct_rate = f"Правильно: {correct}/{current_index}" if current_index > 0 else ""
+        correct_rate = f"✅ Правильно: {correct_count}/{current_index}" if current_index > 0 else ""
+        
+        # Генерируем варианты ответа
+        wrong_options = self._generate_wrong_options(user_id, russian, count=3)
+        all_options = [russian] + wrong_options
+        random.shuffle(all_options)  # Перемешиваем варианты
+        
+        # Находим индекс правильного ответа
+        correct_index = all_options.index(russian)
+        
+        # Сохраняем правильный индекс и варианты в сессии
+        session['correct_index'] = correct_index
+        session['options'] = all_options
+        session['state'] = 'question'
+        
+        # Формируем сообщение
+        options_text = "\n".join([
+            f"{chr(65 + i)}) <code>{option}</code>"
+            for i, option in enumerate(all_options)
+        ])
         
         message = (
             f"🎯 <b>ТРЕНИРОВКА</b> [{progress}]\n\n"
-            f"📝 <b>Переведи слово:</b>\n\n"
-            f"<code>{english}</code>{trans_part}{topic_part}\n\n"
+            f"📝 <b>Выбери правильный перевод:</b>\n\n"
+            f"<b>{english}</b>{trans_part}{topic_part}\n\n"
+            f"{options_text}\n\n"
             f"{correct_rate}"
         )
         
-        # Создаём inline-кнопки
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Знаю",
-                    callback_data=f"quiz_correct_{english}_{user_id}"
-                ),
-                InlineKeyboardButton(
-                    text="❌ Не знаю",
-                    callback_data=f"quiz_wrong_{english}_{user_id}"
+        # Создаём inline-кнопки с вариантами
+        keyboard_buttons = []
+        
+        # Кнопки вариантов (по 2 в ряд)
+        for i in range(0, len(all_options), 2):
+            row = []
+            for j in range(i, min(i + 2, len(all_options))):
+                option_letter = chr(65 + j)
+                callback_data = f"quiz_answer:{self._encode_callback_data(english, user_id, j)}"
+                row.append(
+                    InlineKeyboardButton(
+                        text=f"{option_letter}) {all_options[j][:15]}",  # Ограничиваем длину текста
+                        callback_data=callback_data
+                    )
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="👁️ Показать ответ",
-                    callback_data=f"quiz_show_{english}_{user_id}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⏹️ Завершить",
-                    callback_data=f"quiz_stop_{user_id}"
-                )
-            ]
+            keyboard_buttons.append(row)
+        
+        # Дополнительные кнопки
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="👁️ Показать ответ",
+                callback_data=f"quiz_show:{self._encode_callback_data(english, user_id)}"
+            )
         ])
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="⏹️ Завершить",
+                callback_data=f"quiz_stop:{user_id}"
+            )
+        ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
         return message, keyboard
     
@@ -147,18 +251,18 @@ class QuizService:
         self,
         user_id: int,
         english: str,
-        correct: bool
+        choice_index: int
     ) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
         """
-        Обработать ответ пользователя
+        Обработать выбранный вариант ответа
         
         Args:
             user_id: ID пользователя
             english: Английское слово
-            correct: Был ли ответ правильным
+            choice_index: Индекс выбранного варианта (0-3), -1 = "знаю", -2 = "не знаю"
         
         Returns:
-            Tuple[feedback_message, next_word_keyboard]
+            Tuple[feedback_message, next_button_keyboard]
         """
         if user_id not in self.active_sessions:
             return ("❌ Сессия не найдена", None)
@@ -168,44 +272,77 @@ class QuizService:
         current_index = session['current_index']
         
         # Проверяем, что это правильное слово
-        if current_index < len(words) and words[current_index][0] != english:
+        if current_index >= len(words) or words[current_index][0] != english:
             return ("❌ Ошибка: слово не совпадает", None)
         
-        # Обновляем статистику
-        if correct:
+        # Получаем текущее слово ДО обновления индекса
+        english_word, russian, transcription, topic = words[current_index]
+        trans_part = f" [{transcription}]" if transcription else ""
+        topic_part = f" <i>({topic})</i>" if topic else ""
+        
+        # Обработка специальных случаев: -1 = "знаю", -2 = "не знаю"
+        if choice_index == -1:
+            # Пользователь сказал "Знаю это" после показа ответа
+            is_correct = True
             session['correct'] += 1
+        elif choice_index == -2:
+            # Пользователь сказал "Не знал" после показа ответа
+            is_correct = False
+        else:
+            # Обычный выбор варианта
+            correct_index = session.get('correct_index', 0)
+            options = session.get('options', [])
+            
+            # Проверяем правильность ответа
+            is_correct = (choice_index == correct_index)
+            
+            # Обновляем статистику
+            if is_correct:
+                session['correct'] += 1
         
         # Обновляем в БД через SRS
-        self.srs_service.update_word_after_review(user_id, english, correct)
+        self.srs_service.update_word_after_review(user_id, english, is_correct)
         
-        # Переходим к следующему слову
-        session['current_index'] += 1
+        # Меняем состояние на 'result'
+        session['state'] = 'result'
         
         # Формируем сообщение с результатом
-        russian = words[current_index][1] if current_index < len(words) else ""
-        transcription = words[current_index][2] if current_index < len(words) and len(words[current_index]) > 2 else ""
-        
-        if correct:
-            feedback = f"✅ <b>Правильно!</b> 🎉\n\n"
-        else:
-            trans_part = f" [{transcription}]" if transcription else ""
+        if is_correct:
             feedback = (
-                f"❌ <b>Неправильно!</b>\n\n"
-                f"Правильный ответ: <code>{russian}</code>{trans_part}\n\n"
-                f"Это слово нужно повторить! 📚\n\n"
+                f"✅ <b>Правильно!</b> 🎉\n\n"
+                f"<b>{english}</b>{trans_part} = <code>{russian}</code>{topic_part}\n\n"
             )
-        
-        # Показываем следующее слово
-        if session['current_index'] < len(words):
-            next_msg, next_keyboard = self.show_current_word(user_id)
-            return feedback + "➡️ Следующее слово:", next_keyboard
         else:
-            # Тренировка завершена
-            return self.finish_quiz(user_id)
+            if choice_index >= 0 and choice_index < len(session.get('options', [])):
+                selected_option = session['options'][choice_index]
+                feedback = (
+                    f"❌ <b>Неправильно!</b>\n\n"
+                    f"Твой ответ: <code>{selected_option}</code>\n"
+                    f"Правильный: <code>{russian}</code>{trans_part}{topic_part}\n\n"
+                    f"Это слово нужно повторить! 📚\n\n"
+                )
+            else:
+                feedback = (
+                    f"❌ <b>Неправильно!</b>\n\n"
+                    f"Правильный ответ: <code>{russian}</code>{trans_part}{topic_part}\n\n"
+                    f"Это слово нужно повторить! 📚\n\n"
+                )
+        
+        # Кнопка для перехода к следующему слову
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➡️ Следующее слово",
+                    callback_data=f"quiz_next:{user_id}"
+                )
+            ]
+        ])
+        
+        return feedback, keyboard
     
     def show_answer(self, user_id: int, english: str) -> Tuple[str, InlineKeyboardMarkup]:
         """
-        Показать ответ на слово
+        Показать ответ на слово (без выбора варианта)
         
         Returns:
             Tuple[message_text, keyboard]
@@ -217,23 +354,17 @@ class QuizService:
         words = session['words']
         current_index = session['current_index']
         
-        # Ищем слово в сессии
-        word_data = None
-        for i, (en, ru, trans, topic) in enumerate(words):
-            if en == english and i == current_index:
-                word_data = (en, ru, trans, topic)
-                break
-        
-        if not word_data:
+        # Проверяем, что это правильное слово
+        if current_index >= len(words) or words[current_index][0] != english:
             return ("❌ Слово не найдено", None)
         
-        en, ru, trans, topic = word_data
-        trans_part = f" [{trans}]" if trans else ""
+        english_word, russian, transcription, topic = words[current_index]
+        trans_part = f" [{transcription}]" if transcription else ""
         topic_part = f" <i>({topic})</i>" if topic else ""
         
         message = (
             f"👁️ <b>ОТВЕТ:</b>\n\n"
-            f"<b>{en}</b>{trans_part} = <code>{ru}</code>{topic_part}\n\n"
+            f"<b>{english}</b>{trans_part} = <code>{russian}</code>{topic_part}\n\n"
             f"Запомни это слово! 📚"
         )
         
@@ -242,30 +373,31 @@ class QuizService:
             [
                 InlineKeyboardButton(
                     text="✅ Знаю это",
-                    callback_data=f"quiz_correct_{en}_{user_id}"
+                    callback_data=f"quiz_answer:{self._encode_callback_data(english, user_id, -1)}"  # -1 = знаю
                 ),
                 InlineKeyboardButton(
                     text="❌ Не знал",
-                    callback_data=f"quiz_wrong_{en}_{user_id}"
+                    callback_data=f"quiz_answer:{self._encode_callback_data(english, user_id, -2)}"  # -2 = не знал
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="➡️ Продолжить",
-                    callback_data=f"quiz_next_{user_id}"
+                    text="➡️ Следующее слово",
+                    callback_data=f"quiz_next:{user_id}"
                 )
             ]
         ])
         
         return message, keyboard
     
-    def next_word(self, user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
-        """Перейти к следующему слову без ответа"""
+    def next_word(self, user_id: int) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
+        """Перейти к следующему слову"""
         if user_id not in self.active_sessions:
             return ("❌ Сессия не найдена", None)
         
         session = self.active_sessions[user_id]
         session['current_index'] += 1
+        session['state'] = 'question'
         
         if session['current_index'] >= len(session['words']):
             return self.finish_quiz(user_id)

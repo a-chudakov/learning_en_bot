@@ -17,36 +17,39 @@ class RemindersHandler:
         self.db = db
     
     async def button_reminders(self, message: types.Message) -> None:
-        """Показать меню напоминаний"""
+        """Показать 5 случайных слов для повторения"""
         logger.info(f"User {message.from_user.id} clicked 'Reminders'")
-        stats = self.db.get_reminder_stats(message.from_user.id)
+        user_id = message.from_user.id
         
-        if stats["total_words"] == 0:
+        # Получаем 5 случайных слов
+        words = self.db.get_random_words(user_id, limit=5)
+        
+        if not words:
             await message.answer(
                 "🔔 <b>НАПОМИНАНИЯ</b>\n\n"
                 "❌ Пока нет добавленных слов.",
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=get_main_menu()
             )
             return
         
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="🌅 Утренние")],
-                [KeyboardButton(text="🌙 Вечерние")],
-                [KeyboardButton(text="📊 Статистика")],
-                [KeyboardButton(text="⬅️ Назад")],
-            ],
-            resize_keyboard=True
+        # Форматируем слова
+        words_lines = []
+        for i, (en, ru, trans, topic) in enumerate(words, 1):
+            trans_part = f" [{trans}]" if trans else ""
+            topic_part = f" (#{topic})" if topic else ""
+            words_lines.append(f"<code>{i}.</code> <b>{en}</b>{trans_part} - {ru}{topic_part}")
+        
+        words_text = "\n".join(words_lines)
+        
+        message_text = (
+            f"🔔 <b>НАПОМИНАНИЯ</b>\n\n"
+            f"Пора повторить слова! 📚\n\n"
+            f"{words_text}\n\n"
+            f"Хочешь ещё? Нажми 🔔 Напоминания снова!"
         )
         
-        await message.answer(
-            f"🔔 <b>НАПОМИНАНИЯ</b>\n\n"
-            f"📝 Слов добавлено: {stats['total_words']}\n"
-            f"✨ Никогда не повторённых: {stats['never_reviewed']}\n\n"
-            f"Выбери период:",
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await message.answer(message_text, parse_mode="HTML", reply_markup=get_main_menu())
     
     async def button_morning_reminders(self, message: types.Message) -> None:
         """Показать утренние напоминания"""

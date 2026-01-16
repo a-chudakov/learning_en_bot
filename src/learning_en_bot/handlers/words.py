@@ -48,14 +48,9 @@ class WordsHandler:
         """Обработать добавление слова из текста"""
         logger.info(f"User {message.from_user.id} sent: {message.text}")
         
-        # Проверка формата
-        if " - " not in message.text:
-            await message.answer(
-                "❌ Неправильный формат!\n\n"
-                "Отправь: <code>слово - перевод - транскрипция</code>\n"
-                "Пример: <code>cat - кот - [kæt]</code>",
-                parse_mode="HTML"
-            )
+        # Пропускаем команды и кнопки (они обрабатываются другими handlers)
+        if not message.text or " - " not in message.text:
+            # Если это не формат слова и не команда - игнорируем
             return
         
         # Парсим строку: слово - перевод - транскрипция #тема
@@ -68,11 +63,32 @@ class WordsHandler:
             text = parts_with_topic[0].strip()
             topic = parts_with_topic[1].strip() if len(parts_with_topic) > 1 else None
         
-        # Разбиваем на части
-        parts = text.split(" - ", 2)
-        word = parts[0].strip()
-        translation = parts[1].strip() if len(parts) > 1 else ""
-        transcription = parts[2].strip() if len(parts) > 2 else None
+        # Разбиваем на части (минимум 2 части: слово и перевод)
+        parts = [p.strip() for p in text.split(" - ")]
+        
+        if len(parts) < 2:
+            await message.answer(
+                "❌ Неправильный формат!\n\n"
+                "Отправь: <code>слово - перевод</code>\n"
+                "Или: <code>слово - перевод - транскрипция</code>\n\n"
+                "Примеры:\n"
+                "• <code>cat - кот</code>\n"
+                "• <code>cat - кот - kæt</code>\n"
+                "• <code>cat - кот - [kæt]</code>",
+                parse_mode="HTML"
+            )
+            return
+        
+        word = parts[0]
+        translation = parts[1]
+        
+        # Транскрипция опциональна (3-я часть или пустая)
+        transcription = None
+        if len(parts) > 2:
+            transcription = parts[2]
+            # Убираем квадратные скобки если есть (принимаем в любом формате)
+            if transcription.startswith("[") and transcription.endswith("]"):
+                transcription = transcription[1:-1].strip()
         
         # Базовая валидация
         if not word or not translation:
