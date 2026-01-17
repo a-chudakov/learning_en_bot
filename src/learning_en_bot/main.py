@@ -26,6 +26,7 @@ from src.learning_en_bot.handlers import (
     callbacks
 )
 from src.learning_en_bot.handlers import register_all_handlers
+from src.learning_en_bot.middlewares.auth import AuthMiddleware
 
 # Настройка loguru
 logger.remove()  # Удаляем стандартный handler
@@ -70,6 +71,12 @@ async def main() -> None:
         bot = Bot(token=config.telegram_token)
         storage = MemoryStorage()
         dispatcher = Dispatcher(storage=storage)
+        
+        # Добавляем middleware для приватного доступа
+        if config.allowed_user_id:
+            dispatcher.message.middleware(AuthMiddleware())
+            dispatcher.callback_query.middleware(AuthMiddleware())
+            logger.info(f"🔒 Private bot mode enabled for user {config.allowed_user_id}")
         
         # Устанавливаем команды
         await set_commands(bot)

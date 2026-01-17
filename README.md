@@ -62,35 +62,33 @@ python -m src.learning_en_bot.main
 4. **Тренируйся:** Нажми 🎯 Тренировка
 5. **Повторяй:** Нажми 🔔 Напоминания (покажет 5 случайных слов)
 
-## 🔧 Настройка на VPS (опционально)
+## 🔧 Развёртывание на VPS
 
-Если хочешь, чтобы бот работал 24/7:
+**Полная инструкция:** См. [DEPLOY.md](DEPLOY.md)
 
+**Быстрый старт:**
+
+1. Клонируй на сервер: `git clone <repo> && cd learning_en_bot`
+2. Создай `.env`: `echo "TELEGRAM_TOKEN=токен\nALLOWED_USER_ID=твой_id" > .env`
+3. Запусти с Docker: `docker-compose up -d`
+
+**Или без Docker:**
 ```bash
-# Подключись к серверу
-ssh user@your-server
-
-# Выполни быструю установку
-git clone <your-repo-url> learning_en_bot
-cd learning_en_bot
-python3.11 -m venv venv
-source venv/bin/activate
+python3.11 -m venv venv && source venv/bin/activate
 pip install -e .
-
-# Создай .env с токеном
-echo "TELEGRAM_TOKEN=твой_токен" > .env
-
-# Запусти в screen/tmux (рекомендуется) или через systemd
 screen -S bot
 python -m src.learning_en_bot.main
-# Ctrl+A, затем D для выхода из screen
 ```
 
-**Автозапуск через systemd (опционально):**
-```bash
-# Создай сервис в /etc/systemd/system/learning-en-bot.service
-# Затем: sudo systemctl enable learning-en-bot && sudo systemctl start learning-en-bot
-```
+## 🔒 Приватный бот
+
+Чтобы только ты мог пользоваться ботом:
+
+1. Узнай свой Telegram User ID: напиши [@userinfobot](https://t.me/userinfobot)
+2. Добавь в `.env`: `ALLOWED_USER_ID=твой_id`
+3. Бот будет доступен только тебе!
+
+**Без `ALLOWED_USER_ID`** - бот публичный (доступен всем).
 
 ## 📁 Структура проекта
 

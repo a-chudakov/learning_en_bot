@@ -22,6 +22,12 @@ class Settings(BaseSettings):
         description="Bot username"
     )
     
+    # ПРИВАТНОСТЬ
+    allowed_user_id: Optional[int] = Field(
+        default=None,
+        description="ID пользователя Telegram, который может использовать бота (для приватного бота)"
+    )
+    
     # БАЗА ДАННЫХ
     database_path: str = Field(
         default="./data/bot.db",
