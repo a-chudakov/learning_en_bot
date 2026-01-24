@@ -6,7 +6,8 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 from src.learning_en_bot.database import WordDatabase
-from src.learning_en_bot.utils.pagination import paginate_words
+from src.learning_en_bot.utils.pagination import paginate_words_simple
+from src.learning_en_bot.fsm_states import EditWordStates
 
 
 class WordsHandler:
@@ -16,33 +17,64 @@ class WordsHandler:
         self.db = db
     
     async def button_add_word(self, message: types.Message) -> None:
-        """Показать инструкцию по добавлению слова"""
+        """Показать инструкцию по добавлению слова или фразы"""
         logger.info(f"User {message.from_user.id} clicked 'Add word'")
         await message.answer(
-            "📝 Отправь слово в формате:\n"
-            "<code>слово - перевод - транскрипция</code>\n\n"
-            "Примеры:\n"
+            "📝 <b>Добавление слова или фразы</b>\n\n"
+            "Формат:\n"
+            "<code>слово/фраза - перевод - транскрипция</code>\n\n"
+            "<b>Примеры слов:</b>\n"
             "<code>cat - кот - [kæt]</code>\n"
-            "<code>hello - привет</code> (транскрипция опциональна)\n\n"
-            "Можно добавить тему через #:\n"
-            "<code>cat - кот - [kæt] #животные</code>",
+            "<code>hello - привет</code>\n\n"
+            "<b>Примеры фраз:</b>\n"
+            "<code>a black cat - чёрная кошка</code>\n"
+            "<code>to be honest - честно говоря</code>\n"
+            "<code>break a leg - удачи! (идиома)</code>\n\n"
+            "💡 Можно добавить тему через #:\n"
+            "<code>break a leg - удачи - #idioms</code>",
             parse_mode="HTML"
         )
     
     async def button_my_words(self, message: types.Message, page: int = 0) -> None:
-        """Показать слова пользователя с пагинацией"""
+        """Показать слова пользователя (простой список)"""
         logger.info(f"User {message.from_user.id} clicked 'My words', page {page}")
         words = self.db.get_user_words(message.from_user.id)
         
         if not words:
             await message.answer(
-                "📖 <b>Твои слова:</b>\n\nПока нет добавленных слов.",
+                "📖 <b>Твои слова:</b>\n\nПока нет добавленных слов.\n\n"
+                "Нажми «➕ Добавить» чтобы начать!",
                 parse_mode="HTML"
             )
         else:
             header = f"📖 <b>Твои слова ({len(words)}):</b>\n\n"
-            text, keyboard = paginate_words(words, page=page, header=header)
+            text, keyboard = paginate_words_simple(words, page=page, header=header)
             await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    
+    async def button_edit_word(self, message: types.Message, state: FSMContext) -> None:
+        """Начать поиск слова для редактирования"""
+        logger.info(f"User {message.from_user.id} clicked 'Edit word'")
+        
+        word_count = self.db.get_user_word_count(message.from_user.id)
+        
+        if word_count == 0:
+            await message.answer(
+                "✏️ <b>Редактирование</b>\n\n"
+                "У тебя пока нет слов для редактирования.\n"
+                "Сначала добавь слова через «➕ Добавить»",
+                parse_mode="HTML"
+            )
+            return
+        
+        await state.set_state(EditWordStates.waiting_for_search_query)
+        await message.answer(
+            "🔍 <b>Поиск слова для редактирования</b>\n\n"
+            "Введи слово или часть слова/фразы для поиска.\n"
+            "Можно искать на русском или английском.\n\n"
+            "Например: <code>cat</code> или <code>кот</code>\n\n"
+            "<i>Для отмены отправь /cancel</i>",
+            parse_mode="HTML"
+        )
     
     async def handle_text(self, message: types.Message) -> None:
         """Обработать добавление слова из текста"""

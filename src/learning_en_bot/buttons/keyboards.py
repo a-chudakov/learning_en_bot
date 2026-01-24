@@ -4,7 +4,8 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="➕ Добавить слово"),
+                KeyboardButton(text="➕ Добавить"),
+                KeyboardButton(text="✏️ Редактировать"),
             ],
             [
                 KeyboardButton(text="📖 Мои слова"),

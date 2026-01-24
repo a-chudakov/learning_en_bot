@@ -7,7 +7,7 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 
 from src.learning_en_bot.handlers import commands, words, quiz, reminders, settings, callbacks
-from src.learning_en_bot.fsm_states import ReminderStates
+from src.learning_en_bot.fsm_states import ReminderStates, EditWordStates
 
 
 def register_all_handlers(
@@ -34,9 +34,16 @@ def register_all_handlers(
     dp.message.register(commands.cmd_start, Command("start"))
     dp.message.register(commands.cmd_help, Command("help"))
     
+    # Команда отмены редактирования
+    async def cancel_edit(message, state: FSMContext):
+        await state.clear()
+        await message.answer("❌ Отменено")
+    dp.message.register(cancel_edit, Command("cancel"))
+    
     # Главное меню - слова
-    dp.message.register(words_handler.button_add_word, lambda msg: msg.text == "➕ Добавить слово")
+    dp.message.register(words_handler.button_add_word, lambda msg: msg.text == "➕ Добавить")
     dp.message.register(words_handler.button_my_words, lambda msg: msg.text == "📖 Мои слова")
+    dp.message.register(words_handler.button_edit_word, lambda msg: msg.text == "✏️ Редактировать")
     
     # Главное меню - тренировка
     dp.message.register(quiz_handler.button_quiz_menu, lambda msg: msg.text == "🎯 Тренировка")
@@ -79,6 +86,28 @@ def register_all_handlers(
         ReminderStates.waiting_for_evening_time
     )
     
+    # FSM обработчики для редактирования слов
+    dp.message.register(
+        callbacks_handler.handle_search_query,
+        EditWordStates.waiting_for_search_query
+    )
+    dp.message.register(
+        callbacks_handler.handle_new_english,
+        EditWordStates.waiting_for_new_english
+    )
+    dp.message.register(
+        callbacks_handler.handle_new_russian,
+        EditWordStates.waiting_for_new_russian
+    )
+    dp.message.register(
+        callbacks_handler.handle_new_transcription,
+        EditWordStates.waiting_for_new_transcription
+    )
+    dp.message.register(
+        callbacks_handler.handle_new_topic,
+        EditWordStates.waiting_for_new_topic
+    )
+    
     # Назад
     dp.message.register(settings_handler.go_back, lambda msg: msg.text == "⬅️ Назад")
     
@@ -86,8 +115,29 @@ def register_all_handlers(
     # Викторина
     dp.callback_query.register(quiz_handler.handle_quiz_callback, F.data.startswith("quiz_"))
     
-    # Пагинация
+    # Пагинация (старый формат)
     dp.callback_query.register(callbacks_handler.handle_page_callback, F.data.startswith("page_"))
+    
+    # Пагинация слов с редактированием
+    dp.callback_query.register(callbacks_handler.handle_words_page_callback, F.data.startswith("words_page_"))
+    
+    # Редактирование слов
+    dp.callback_query.register(callbacks_handler.handle_edit_word_callback, F.data.startswith("edit_word:"))
+    dp.callback_query.register(callbacks_handler.handle_edit_field_callback, F.data.startswith("edit_english:"))
+    dp.callback_query.register(callbacks_handler.handle_edit_field_callback, F.data.startswith("edit_russian:"))
+    dp.callback_query.register(callbacks_handler.handle_edit_field_callback, F.data.startswith("edit_transcription:"))
+    dp.callback_query.register(callbacks_handler.handle_edit_field_callback, F.data.startswith("edit_topic:"))
+    
+    # Удаление слов
+    dp.callback_query.register(callbacks_handler.handle_delete_word_callback, F.data.startswith("delete_word:"))
+    dp.callback_query.register(callbacks_handler.handle_confirm_delete_callback, F.data.startswith("confirm_delete:"))
+    dp.callback_query.register(callbacks_handler.handle_do_delete_callback, F.data.startswith("do_delete:"))
+    
+    # Назад к списку слов
+    dp.callback_query.register(callbacks_handler.handle_back_to_words_callback, F.data == "back_to_words")
+    
+    # Новый поиск
+    dp.callback_query.register(callbacks_handler.handle_new_search_callback, F.data == "new_search")
     
     # ВСЕГДА ПОСЛЕДНИМ - обработка добавления слов (fallback для текстовых сообщений)
     # Это должно быть в самом конце, чтобы не перехватывать кнопки и команды

@@ -300,6 +300,194 @@ class WordDatabase:
             if conn:
                 conn.close()
     
+    def get_word_by_id(self, user_id: int, word_id: int) -> Optional[dict]:
+        """Получить слово по ID"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, english, russian, transcription, topic
+                FROM words
+                WHERE user_id = ? AND id = ?
+            """, (user_id, word_id))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    "id": result[0],
+                    "english": result[1],
+                    "russian": result[2],
+                    "transcription": result[3],
+                    "topic": result[4]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error getting word by id: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def get_word_by_english(self, user_id: int, english: str) -> Optional[dict]:
+        """Получить слово по английскому тексту"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, english, russian, transcription, topic
+                FROM words
+                WHERE user_id = ? AND english = ?
+            """, (user_id, english.lower().strip()))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    "id": result[0],
+                    "english": result[1],
+                    "russian": result[2],
+                    "transcription": result[3],
+                    "topic": result[4]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error getting word by english: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def update_word(self, user_id: int, word_id: int, english: str = None, 
+                   russian: str = None, transcription: str = None, topic: str = None) -> bool:
+        """Обновить слово"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Получаем текущие значения
+            cursor.execute("""
+                SELECT english, russian, transcription, topic
+                FROM words
+                WHERE user_id = ? AND id = ?
+            """, (user_id, word_id))
+            
+            result = cursor.fetchone()
+            if not result:
+                return False
+            
+            current_english, current_russian, current_transcription, current_topic = result
+            
+            # Обновляем только переданные поля
+            new_english = english.lower().strip() if english else current_english
+            new_russian = russian.strip() if russian else current_russian
+            new_transcription = transcription.strip() if transcription else current_transcription
+            new_topic = topic.strip() if topic else current_topic
+            
+            cursor.execute("""
+                UPDATE words
+                SET english = ?, russian = ?, transcription = ?, topic = ?
+                WHERE user_id = ? AND id = ?
+            """, (new_english, new_russian, new_transcription, new_topic, user_id, word_id))
+            
+            conn.commit()
+            logger.info(f"✅ Word updated: id={word_id} for user {user_id}")
+            return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"Word with this english already exists for user {user_id}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error updating word: {e}")
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if conn:
+                conn.close()
+    
+    def get_user_words_with_id(self, user_id: int) -> List[Tuple[int, str, str, str, str]]:
+        """Получить все слова пользователя с ID (id, english, russian, transcription, topic)"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, english, russian, transcription, topic FROM words
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            """, (user_id,))
+            
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Error getting words with id: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+    
+    def search_words(self, user_id: int, query: str, limit: int = 10) -> List[Tuple[int, str, str, str, str]]:
+        """Поиск слов по запросу (ищет в english и russian)"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            search_pattern = f"%{query.lower().strip()}%"
+            
+            cursor.execute("""
+                SELECT id, english, russian, transcription, topic FROM words
+                WHERE user_id = ? AND (
+                    LOWER(english) LIKE ? OR 
+                    LOWER(russian) LIKE ?
+                )
+                ORDER BY 
+                    CASE WHEN LOWER(english) = ? THEN 0
+                         WHEN LOWER(english) LIKE ? THEN 1
+                         ELSE 2 END,
+                    created_at DESC
+                LIMIT ?
+            """, (user_id, search_pattern, search_pattern, 
+                  query.lower().strip(), f"{query.lower().strip()}%", limit))
+            
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Error searching words: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+    
+    def delete_word_by_id(self, user_id: int, word_id: int) -> bool:
+        """Удалить слово по ID"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM words
+                WHERE user_id = ? AND id = ?
+            """, (user_id, word_id))
+            
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            
+            if deleted:
+                logger.info(f"✅ Word deleted by id={word_id} for user {user_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"❌ Error deleting word by id: {e}")
+            if conn:
+                conn.rollback()
+            return False
+        finally:
+            if conn:
+                conn.close()
+    
     # ==================== НАПОМИНАНИЯ ====================
     
     def get_recent_words(self, user_id: int, limit: int = 15) -> List[Tuple[str, str]]:
