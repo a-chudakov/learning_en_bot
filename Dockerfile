@@ -14,5 +14,5 @@ RUN pip install uv && \
 # Создаём директорию для данных
 RUN mkdir -p /app/data
 
-# Запуск
-CMD ["python", "-m", "src.learning_en_bot.main"]
+# Запуск через Python из .venv (uv sync ставит зависимости туда)
+CMD ["/app/.venv/bin/python", "-m", "src.learning_en_bot.main"]
