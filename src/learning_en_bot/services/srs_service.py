@@ -83,19 +83,21 @@ class SRSService:
             # 1. Слова, которые никогда не повторялись (last_reviewed_at IS NULL)
             # 2. Слова, у которых next_review_date <= now (или не установлена)
             # 3. Слова с высокой сложностью, которые давно не повторялись
+            # ORDER BY без NULLS FIRST (совместимость со старыми SQLite < 3.30)
             cursor.execute("""
-                SELECT english, russian, transcription, topic, 
+                SELECT english, russian, transcription, topic,
                        last_reviewed_at, difficulty, review_count
                 FROM words
                 WHERE user_id = ?
-                ORDER BY 
-                    CASE 
+                ORDER BY
+                    CASE
                         WHEN last_reviewed_at IS NULL THEN 0
                         WHEN difficulty >= 7 THEN 1
                         WHEN difficulty >= 5 THEN 2
                         ELSE 3
                     END,
-                    last_reviewed_at ASC NULLS FIRST,
+                    CASE WHEN last_reviewed_at IS NULL THEN 0 ELSE 1 END,
+                    last_reviewed_at ASC,
                     difficulty DESC,
                     created_at ASC
                 LIMIT ?

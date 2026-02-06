@@ -59,51 +59,70 @@ class QuizHandler:
         await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
     
     def _parse_callback_data(self, data: str) -> Optional[dict]:
-        """Парсинг callback_data (поддержка старого и нового форматов)"""
+        """Парсинг callback_data (короткий формат ≤64 байт + обратная совместимость)"""
         try:
+            # quiz_next:user_id или quiz_stop:user_id
             if data.startswith("quiz_next:") or data.startswith("quiz_stop:"):
-                # Простой формат: "quiz_action:user_id" (просто число)
                 parts = data.split(":", 1)
                 if len(parts) == 2:
-                    action = parts[0]
                     try:
                         user_id = int(parts[1])
-                        return {'action': action, 'user_id': user_id}
+                        return {'action': parts[0], 'user_id': user_id}
                     except ValueError:
-                        # Если не число, пробуем JSON
-                        json_data = json.loads(parts[1])
-                        return {'action': action, **json_data}
+                        pass
             
-            if data.startswith("quiz_answer:") or data.startswith("quiz_show:"):
-                # Новый формат: "quiz_action:json_data"
+            # quiz_answer:user_id:choice (короткий формат; word берётся из сессии)
+            if data.startswith("quiz_answer:"):
+                parts = data.split(":")
+                if len(parts) >= 3:
+                    try:
+                        user_id = int(parts[1])
+                        choice = int(parts[2])
+                        return {'action': 'quiz_answer', 'user_id': user_id, 'choice': choice}
+                    except ValueError:
+                        pass
+                # Старый формат JSON (обратная совместимость)
+                if len(parts) == 2:
+                    try:
+                        parsed = json.loads(parts[1])
+                        return {'action': 'quiz_answer', **parsed}
+                    except (ValueError, TypeError):
+                        pass
+            
+            # quiz_show:user_id (короткий формат)
+            if data.startswith("quiz_show:"):
                 parts = data.split(":", 1)
                 if len(parts) == 2:
-                    action = parts[0]
-                    json_data = json.loads(parts[1])
-                    return {'action': action, **json_data}
+                    try:
+                        user_id = int(parts[1])
+                        return {'action': 'quiz_show', 'user_id': user_id}
+                    except ValueError:
+                        pass
+                if len(parts) == 2:
+                    try:
+                        parsed = json.loads(parts[1])
+                        return {'action': 'quiz_show', **parsed}
+                    except (ValueError, TypeError):
+                        pass
             
-            # Старый формат для обратной совместимости
+            # Старый формат quiz_correct_ / quiz_wrong_
             if data.startswith("quiz_correct_") or data.startswith("quiz_wrong_"):
                 parts = data.split("||", 2)
                 if len(parts) >= 3:
-                    prefix = parts[0]  # quiz_correct_ или quiz_wrong_
-                    word = parts[1]
-                    user_id = int(parts[2])
                     return {
-                        'action': prefix,
-                        'word': word,
-                        'user_id': user_id,
-                        'choice': -1 if 'correct' in prefix else -2
+                        'action': parts[0],
+                        'word': parts[1],
+                        'user_id': int(parts[2]),
+                        'choice': -1 if 'correct' in parts[0] else -2
                     }
             
-            # Простой формат для quiz_next и quiz_stop
             if data.startswith("quiz_next_") or data.startswith("quiz_stop_"):
-                parts = data.split("_")
-                if len(parts) >= 3:
-                    action = f"quiz_{parts[1]}"
-                    user_id = int(parts[2])
-                    return {'action': action, 'user_id': user_id}
-            
+                segs = data.split("_")
+                if len(segs) >= 3:
+                    try:
+                        return {'action': f"quiz_{segs[1]}", 'user_id': int(segs[2])}
+                    except ValueError:
+                        pass
             return None
         except Exception as e:
             logger.error(f"❌ Error parsing callback_data '{data}': {e}")
@@ -129,10 +148,13 @@ class QuizHandler:
             action = parsed.get('action', '')
             word = parsed.get('word')
             choice = parsed.get('choice')
+            # Короткий формат: слово берём из сессии
+            if word is None and action in ("quiz_answer", "quiz_show"):
+                word = self.quiz_service.get_current_english(user_id)
             
             if action == "quiz_answer":
                 # Обработка выбранного варианта ответа
-                if word and choice is not None:
+                if word is not None and choice is not None:
                     # Выбран конкретный вариант (0-3, -1, -2)
                     text, keyboard = self.quiz_service.handle_answer(user_id, word, choice)
                     
@@ -157,7 +179,7 @@ class QuizHandler:
             
             elif action == "quiz_show":
                 # Показать ответ
-                if word:
+                if word is not None:
                     text, keyboard = self.quiz_service.show_answer(user_id, word)
                     await callback.answer("👁️ Показан ответ")
                     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -191,8 +213,8 @@ class QuizHandler:
                 word = parsed.get('word')
                 if word:
                     is_correct = 'correct' in action
-                    # Старый формат - используем как выбор варианта
-                    text, keyboard = self.quiz_service.handle_answer(user_id, word, 0 if is_correct else -1)
+                    # -1 = "знаю", -2 = "не знал"
+                    text, keyboard = self.quiz_service.handle_answer(user_id, word, -1 if is_correct else -2)
                     await callback.answer("✅" if is_correct else "❌")
                     if keyboard:
                         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)

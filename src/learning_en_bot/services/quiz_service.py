@@ -3,7 +3,6 @@
 """
 
 import random
-import json
 from typing import List, Tuple, Optional, Dict
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from loguru import logger
@@ -56,43 +55,16 @@ class QuizService:
         
         return wrong_options
     
-    def _encode_callback_data(self, word: str, user_id: int, choice_index: int = None) -> str:
-        """
-        Закодировать данные для callback_data (используем JSON для надёжности)
-        
-        Args:
-            word: Английское слово
-            user_id: ID пользователя
-            choice_index: Индекс выбранного варианта (для ответа)
-        
-        Returns:
-            Закодированная строка для callback_data
-        """
-        data = {
-            'word': word,
-            'user_id': user_id
-        }
-        if choice_index is not None:
-            data['choice'] = choice_index
-        return json.dumps(data)
-    
-    def _decode_callback_data(self, callback_data: str) -> Optional[Dict]:
-        """Декодировать callback_data"""
-        try:
-            if callback_data.startswith('quiz_'):
-                # Старый формат для обратной совместимости
-                parts = callback_data.split("||", 2)
-                if len(parts) >= 3:
-                    prefix = parts[0]
-                    word = parts[1]
-                    user_id = int(parts[2])
-                    return {'prefix': prefix, 'word': word, 'user_id': user_id}
-            else:
-                # Новый формат JSON
-                return json.loads(callback_data)
-        except Exception as e:
-            logger.error(f"❌ Error decoding callback_data: {e}")
+    def get_current_english(self, user_id: int) -> Optional[str]:
+        """Текущее слово в сессии (для коротких callback_data ≤64 байт)."""
+        if user_id not in self.active_sessions:
             return None
+        session = self.active_sessions[user_id]
+        words = session['words']
+        idx = session['current_index']
+        if idx >= len(words):
+            return None
+        return words[idx][0]
     
     def start_quiz(
         self,
@@ -215,25 +187,23 @@ class QuizService:
         # Создаём inline-кнопки с вариантами
         keyboard_buttons = []
         
-        # Кнопки вариантов (по 2 в ряд)
+        # Короткий callback_data (лимит Telegram 64 байта); слово берётся из сессии в handler
         for i in range(0, len(all_options), 2):
             row = []
             for j in range(i, min(i + 2, len(all_options))):
                 option_letter = chr(65 + j)
-                callback_data = f"quiz_answer:{self._encode_callback_data(english, user_id, j)}"
                 row.append(
                     InlineKeyboardButton(
-                        text=f"{option_letter}) {all_options[j][:15]}",  # Ограничиваем длину текста
-                        callback_data=callback_data
+                        text=f"{option_letter}) {all_options[j][:15]}",
+                        callback_data=f"quiz_answer:{user_id}:{j}"
                     )
                 )
             keyboard_buttons.append(row)
         
-        # Дополнительные кнопки
         keyboard_buttons.append([
             InlineKeyboardButton(
                 text="👁️ Показать ответ",
-                callback_data=f"quiz_show:{self._encode_callback_data(english, user_id)}"
+                callback_data=f"quiz_show:{user_id}"
             )
         ])
         keyboard_buttons.append([
@@ -368,16 +338,16 @@ class QuizService:
             f"Запомни это слово! 📚"
         )
         
-        # Кнопки для продолжения
+        # Короткий callback_data (лимит 64 байта)
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="✅ Знаю это",
-                    callback_data=f"quiz_answer:{self._encode_callback_data(english, user_id, -1)}"  # -1 = знаю
+                    callback_data=f"quiz_answer:{user_id}:-1"
                 ),
                 InlineKeyboardButton(
                     text="❌ Не знал",
-                    callback_data=f"quiz_answer:{self._encode_callback_data(english, user_id, -2)}"  # -2 = не знал
+                    callback_data=f"quiz_answer:{user_id}:-2"
                 )
             ],
             [
