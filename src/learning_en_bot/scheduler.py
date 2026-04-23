@@ -4,6 +4,7 @@
 """
 
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
@@ -12,13 +13,13 @@ from loguru import logger
 
 class ReminderScheduler:
     """Планировщик напоминаний с поддержкой индивидуальных настроек"""
-    
-    def __init__(self, bot: Bot, db, reminder_system):
+
+    def __init__(self, bot: Bot, db, reminder_system, timezone: str = "UTC"):
         self.bot = bot
         self.db = db
         self.reminder_system = reminder_system
-        self.scheduler = AsyncIOScheduler()
-        self.sent_today = {}  # {(user_id, 'morning'/'evening'): date} - для отслеживания отправленных сегодня
+        self.tz = ZoneInfo(timezone)
+        self.scheduler = AsyncIOScheduler(timezone=timezone)
     
     def _parse_time(self, time_str: str) -> tuple[int, int]:
         """Парсинг времени из строки HH:MM"""
@@ -35,50 +36,40 @@ class ReminderScheduler:
             logger.warning(f"Invalid time format '{time_str}', using default 09:00: {e}")
             return 9, 0
     
-    async def send_morning_reminder(self, user_id: int) -> None:
+    async def send_morning_reminder(self, user_id: int, today_date: str) -> None:
         """Отправить утреннее напоминание"""
         try:
-            # Проверяем включены ли напоминания
             settings = self.db.get_user_settings(user_id)
             if not settings["reminders_enabled"]:
                 return
-            
-            # Проверяем, не отправляли ли уже сегодня
-            today = datetime.now().date()
-            key = (user_id, 'morning')
-            if self.sent_today.get(key) == today:
+
+            if self.db.was_reminder_sent_today(user_id, "morning", today_date):
                 return
-            
-            # Получаем утреннее сообщение
+
             text, _ = self.reminder_system.get_morning_reminder_message(user_id)
-            
+
             if text and "❌ Нет слов" not in text:
                 await self.bot.send_message(user_id, text, parse_mode="HTML")
-                self.sent_today[key] = today
+                self.db.mark_reminder_sent(user_id, "morning")
                 logger.info(f"✅ Morning reminder sent to user {user_id}")
         except Exception as e:
             logger.error(f"❌ Error sending morning reminder to {user_id}: {e}")
-    
-    async def send_evening_reminder(self, user_id: int) -> None:
+
+    async def send_evening_reminder(self, user_id: int, today_date: str) -> None:
         """Отправить вечернее напоминание"""
         try:
-            # Проверяем включены ли напоминания
             settings = self.db.get_user_settings(user_id)
             if not settings["reminders_enabled"]:
                 return
-            
-            # Проверяем, не отправляли ли уже сегодня
-            today = datetime.now().date()
-            key = (user_id, 'evening')
-            if self.sent_today.get(key) == today:
+
+            if self.db.was_reminder_sent_today(user_id, "evening", today_date):
                 return
-            
-            # Получаем вечернее сообщение
+
             text, _ = self.reminder_system.get_evening_reminder_message(user_id)
-            
+
             if text and "❌ Нет слов" not in text:
                 await self.bot.send_message(user_id, text, parse_mode="HTML")
-                self.sent_today[key] = today
+                self.db.mark_reminder_sent(user_id, "evening")
                 logger.info(f"✅ Evening reminder sent to user {user_id}")
         except Exception as e:
             logger.error(f"❌ Error sending evening reminder to {user_id}: {e}")
@@ -107,56 +98,26 @@ class ReminderScheduler:
     async def _check_and_send_reminders(self) -> None:
         """Проверить и отправить напоминания пользователям в их время"""
         try:
-            now = datetime.now()
+            now = datetime.now(self.tz)
             current_time = now.time().replace(second=0, microsecond=0)
-            today = now.date()
-            
-            # Получаем всех пользователей с их настройками
-            import sqlite3
-            conn = sqlite3.connect(self.db.db_path)
-            cursor = conn.cursor()
-            
-            # Получаем пользователей из user_settings
-            cursor.execute("""
-                SELECT user_id, morning_time, evening_time, reminders_enabled
-                FROM user_settings
-                WHERE reminders_enabled = 1
-            """)
-            users = cursor.fetchall()
-            conn.close()
-            
-            for user_id, morning_time_str, evening_time_str, _ in users:
+            today_date = now.strftime("%Y-%m-%d")
+
+            users = self.db.get_users_for_reminders()
+
+            for user_id, morning_time_str, evening_time_str in users:
                 try:
-                    # Парсим время
                     morning_hour, morning_minute = self._parse_time(morning_time_str)
                     evening_hour, evening_minute = self._parse_time(evening_time_str)
-                    
-                    morning_time = time(morning_hour, morning_minute)
-                    evening_time = time(evening_hour, evening_minute)
-                    
-                    # Проверяем утреннее время
-                    if current_time == morning_time:
-                        key = (user_id, 'morning')
-                        if self.sent_today.get(key) != today:
-                            await self.send_morning_reminder(user_id)
-                    
-                    # Проверяем вечернее время
-                    if current_time == evening_time:
-                        key = (user_id, 'evening')
-                        if self.sent_today.get(key) != today:
-                            await self.send_evening_reminder(user_id)
-                            
+
+                    if current_time == time(morning_hour, morning_minute):
+                        await self.send_morning_reminder(user_id, today_date)
+
+                    if current_time == time(evening_hour, evening_minute):
+                        await self.send_evening_reminder(user_id, today_date)
+
                 except Exception as e:
                     logger.error(f"❌ Error processing user {user_id}: {e}")
-            
-            # Очищаем старые записи (старше 1 дня)
-            keys_to_remove = [
-                key for key, date in self.sent_today.items()
-                if date < today
-            ]
-            for key in keys_to_remove:
-                del self.sent_today[key]
-                
+
         except Exception as e:
             logger.error(f"❌ Error in reminder checker: {e}")
     

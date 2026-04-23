@@ -2,6 +2,8 @@
 Обработчики для настроек
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from loguru import logger
@@ -13,10 +15,11 @@ from src.learning_en_bot.buttons.keyboards import get_main_menu
 
 class SettingsHandler:
     """Обработчики для настроек"""
-    
-    def __init__(self, settings_manager: SettingsManager, db: WordDatabase):
+
+    def __init__(self, settings_manager: SettingsManager, db: WordDatabase, timezone: str = "UTC"):
         self.settings_manager = settings_manager
         self.db = db
+        self.tz_label = datetime.now(ZoneInfo(timezone)).strftime("%Z")
     
     async def button_settings(self, message: types.Message) -> None:
         """Показать меню настроек"""
@@ -66,7 +69,7 @@ class SettingsHandler:
         if success:
             await message.answer(
                 f"✅ <b>Утреннее время установлено!</b>\n\n"
-                f"⏰ Время: <code>{time_str} MSK</code>\n\n"
+                f"⏰ Время: <code>{time_str} {self.tz_label}</code>\n\n"
                 f"Бот будет присылать напоминания в это время 📲",
                 parse_mode="HTML",
                 reply_markup=get_main_menu()
@@ -119,7 +122,7 @@ class SettingsHandler:
         if success:
             await message.answer(
                 f"✅ <b>Вечернее время установлено!</b>\n\n"
-                f"⏰ Время: <code>{time_str} MSK</code>\n\n"
+                f"⏰ Время: <code>{time_str} {self.tz_label}</code>\n\n"
                 f"Бот будет присылать напоминания в это время 📲",
                 parse_mode="HTML",
                 reply_markup=get_main_menu()

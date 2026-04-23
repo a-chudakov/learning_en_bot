@@ -2,26 +2,29 @@
 Менеджер настроек пользователя
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from loguru import logger
 
 
 class SettingsManager:
     """Управление настройками пользователя"""
-    
-    def __init__(self, db):
+
+    def __init__(self, db, timezone: str = "UTC"):
         self.db = db
-    
+        self.tz_label = datetime.now(ZoneInfo(timezone)).strftime("%Z")
+
     def get_settings_message(self, user_id: int) -> str:
         """Получить сообщение с текущими настройками"""
         settings = self.db.get_user_settings(user_id)
-        
+
         status = "✅ Включены" if settings["reminders_enabled"] else "❌ Отключены"
-        
+
         return (
             f"⚙️ <b>НАСТРОЙКИ НАПОМИНАНИЙ</b>\n\n"
-            f"🌅 Утреннее время: <code>{settings['morning_time']} MSK</code>\n"
-            f"🌙 Вечернее время: <code>{settings['evening_time']} MSK</code>\n"
+            f"🌅 Утреннее время: <code>{settings['morning_time']} {self.tz_label}</code>\n"
+            f"🌙 Вечернее время: <code>{settings['evening_time']} {self.tz_label}</code>\n"
             f"🔔 Статус: {status}\n\n"
             f"Выбери что изменить:"
         )

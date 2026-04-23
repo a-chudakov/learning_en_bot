@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 
 from src.learning_en_bot.handlers import commands, words, quiz, reminders, settings, callbacks
 from src.learning_en_bot.fsm_states import ReminderStates, EditWordStates
+from src.learning_en_bot.buttons.keyboards import get_main_menu
 
 
 def register_all_handlers(
@@ -37,7 +38,7 @@ def register_all_handlers(
     # Команда отмены редактирования
     async def cancel_edit(message, state: FSMContext):
         await state.clear()
-        await message.answer("❌ Отменено")
+        await message.answer("❌ Отменено", reply_markup=get_main_menu())
     dp.message.register(cancel_edit, Command("cancel"))
     
     # Главное меню - слова

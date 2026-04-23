@@ -243,20 +243,22 @@ class WordDatabase:
     
     def get_user_word_count(self, user_id: int) -> int:
         """Получить количество слов пользователя"""
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 SELECT COUNT(*) FROM words WHERE user_id = ?
             """, (user_id,))
-            
-            count = cursor.fetchone()[0]
-            conn.close()
-            return count
+
+            return cursor.fetchone()[0]
         except Exception as e:
             logger.error(f"❌ Error getting word count: {e}")
             return 0
+        finally:
+            if conn:
+                conn.close()
     
     def delete_word(self, user_id: int, english: str) -> bool:
         """Удалить слово"""
@@ -495,39 +497,41 @@ class WordDatabase:
         MODE 1: Получить последние N слов (новые)
         Для напоминания свежих слов
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 SELECT english, russian FROM words
                 WHERE user_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
             """, (user_id, limit))
-            
-            words = cursor.fetchall()
-            conn.close()
-            return words
+
+            return cursor.fetchall()
         except Exception as e:
             logger.error(f"❌ Error getting recent words: {e}")
             return []
+        finally:
+            if conn:
+                conn.close()
     
     def get_old_words(self, user_id: int, limit: int = 15) -> List[Tuple[str, str]]:
         """
         MODE 2: Получить старые слова (не повторённые давно)
         Для напоминания забытых слов
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
-            # Берём слова, которые не повторялись или повторялись давно
+
             cursor.execute("""
                 SELECT english, russian FROM words
                 WHERE user_id = ?
-                ORDER BY 
-                    CASE 
+                ORDER BY
+                    CASE
                         WHEN last_reviewed_at IS NULL THEN 0
                         ELSE 1
                     END,
@@ -535,36 +539,39 @@ class WordDatabase:
                     created_at ASC
                 LIMIT ?
             """, (user_id, limit))
-            
-            words = cursor.fetchall()
-            conn.close()
-            return words
+
+            return cursor.fetchall()
         except Exception as e:
             logger.error(f"❌ Error getting old words: {e}")
             return []
+        finally:
+            if conn:
+                conn.close()
     
     def get_difficult_words(self, user_id: int, limit: int = 15) -> List[Tuple[str, str]]:
         """
         MODE 2+: Получить сложные слова (самые тяжелые)
         Для напоминания самых сложных слов
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 SELECT english, russian FROM words
                 WHERE user_id = ?
                 ORDER BY difficulty DESC, review_count ASC
                 LIMIT ?
             """, (user_id, limit))
-            
-            words = cursor.fetchall()
-            conn.close()
-            return words
+
+            return cursor.fetchall()
         except Exception as e:
             logger.error(f"❌ Error getting difficult words: {e}")
             return []
+        finally:
+            if conn:
+                conn.close()
     
     def mark_word_reviewed(self, user_id: int, english: str, correct: bool = True) -> bool:
         """
@@ -572,31 +579,23 @@ class WordDatabase:
         correct=True - ответ верный
         correct=False - ответ неверный (увеличивает сложность)
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
-            # Получаем текущие значения
+
             cursor.execute("""
                 SELECT review_count, difficulty FROM words
                 WHERE user_id = ? AND english = ?
             """, (user_id, english.lower()))
-            
+
             result = cursor.fetchone()
             if not result:
-                conn.close()
                 return False
-            
+
             review_count, difficulty = result
-            
-            # Обновляем сложность
-            if correct:
-                # Если правильный ответ - уменьшаем сложность
-                new_difficulty = max(1, difficulty - 1)
-            else:
-                # Если неправильный - увеличиваем сложность
-                new_difficulty = min(10, difficulty + 1)
-            
+            new_difficulty = max(1, difficulty - 1) if correct else min(10, difficulty + 1)
+
             cursor.execute("""
                 UPDATE words
                 SET last_reviewed_at = CURRENT_TIMESTAMP,
@@ -604,59 +603,52 @@ class WordDatabase:
                     difficulty = ?
                 WHERE user_id = ? AND english = ?
             """, (new_difficulty, user_id, english.lower()))
-            
+
             conn.commit()
-            conn.close()
             logger.info(f"✅ Word reviewed: {english} (difficulty: {new_difficulty})")
             return True
         except Exception as e:
             logger.error(f"❌ Error marking word as reviewed: {e}")
+            if conn:
+                conn.rollback()
             return False
+        finally:
+            if conn:
+                conn.close()
     
     def get_reminder_stats(self, user_id: int) -> dict:
         """
         Получить статистику для напоминаний
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
-            # Всего слов
+
             cursor.execute("SELECT COUNT(*) FROM words WHERE user_id = ?", (user_id,))
-            result = cursor.fetchone()
-            total_words = result[0] if result else 0
-            
-            # Никогда не повторённые
+            total_words = cursor.fetchone()[0] or 0
+
             cursor.execute("""
-                SELECT COUNT(*) FROM words 
+                SELECT COUNT(*) FROM words
                 WHERE user_id = ? AND last_reviewed_at IS NULL
             """, (user_id,))
-            result = cursor.fetchone()
-            never_reviewed = result[0] if result else 0
-            
-            # Повторённые сегодня
+            never_reviewed = cursor.fetchone()[0] or 0
+
             today = datetime.now().date()
             cursor.execute("""
-                SELECT COUNT(*) FROM words 
+                SELECT COUNT(*) FROM words
                 WHERE user_id = ? AND DATE(last_reviewed_at) = ?
             """, (user_id, today))
-            result = cursor.fetchone()
-            reviewed_today = result[0] if result else 0
-            
-            # Средняя сложность
-            cursor.execute("""
-                SELECT AVG(difficulty) FROM words WHERE user_id = ?
-            """, (user_id,))
+            reviewed_today = cursor.fetchone()[0] or 0
+
+            cursor.execute("SELECT AVG(difficulty) FROM words WHERE user_id = ?", (user_id,))
             result = cursor.fetchone()
             avg_difficulty = result[0] if result and result[0] else 1
-            
-            conn.close()
-            
-            # Безопасный расчёт ready_for_reminder
+
             ready_for_reminder = never_reviewed > 0
             if total_words > 0 and reviewed_today < total_words // 3:
                 ready_for_reminder = True
-            
+
             return {
                 "total_words": total_words,
                 "never_reviewed": never_reviewed,
@@ -666,7 +658,6 @@ class WordDatabase:
             }
         except Exception as e:
             logger.error(f"❌ Error getting reminder stats: {e}", exc_info=True)
-            # Возвращаем безопасные значения вместо пустого dict
             return {
                 "total_words": 0,
                 "never_reviewed": 0,
@@ -674,6 +665,9 @@ class WordDatabase:
                 "avg_difficulty": 1.0,
                 "ready_for_reminder": False
             }
+        finally:
+            if conn:
+                conn.close()
 
     # ==================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ====================
     
@@ -803,6 +797,136 @@ class WordDatabase:
             if conn:
                 conn.close()
     
+    def get_users_for_reminders(self) -> List[Tuple[int, str, str]]:
+        """Вернуть (user_id, morning_time, evening_time) для всех пользователей с включёнными напоминаниями"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT user_id, morning_time, evening_time
+                FROM user_settings
+                WHERE reminders_enabled = 1
+            """)
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Error getting users for reminders: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_words_sorted_for_srs(self, user_id: int, limit: int) -> list:
+        """Вернуть слова, отсортированные по приоритету SRS.
+        Каждая строка: (english, russian, transcription, topic, last_reviewed_at, difficulty, review_count)
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT english, russian, transcription, topic,
+                       last_reviewed_at, difficulty, review_count
+                FROM words
+                WHERE user_id = ?
+                ORDER BY
+                    CASE
+                        WHEN last_reviewed_at IS NULL THEN 0
+                        WHEN difficulty >= 7 THEN 1
+                        WHEN difficulty >= 5 THEN 2
+                        ELSE 3
+                    END,
+                    CASE WHEN last_reviewed_at IS NULL THEN 0 ELSE 1 END,
+                    last_reviewed_at ASC,
+                    difficulty DESC,
+                    created_at ASC
+                LIMIT ?
+            """, (user_id, limit))
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Error getting words for SRS: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_srs_stats(self, user_id: int, now: datetime) -> dict:
+        """Статистика SRS: сколько слов готово к повторению, сложных, никогда не повторённых"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT COUNT(*) FROM words
+                WHERE user_id = ?
+                  AND (last_reviewed_at IS NULL OR
+                       (julianday(?) - julianday(last_reviewed_at)) >= 1)
+            """, (user_id, now))
+            ready_to_review = cursor.fetchone()[0] or 0
+
+            cursor.execute("""
+                SELECT COUNT(*) FROM words
+                WHERE user_id = ? AND difficulty >= 7
+            """, (user_id,))
+            difficult_words = cursor.fetchone()[0] or 0
+
+            cursor.execute("""
+                SELECT COUNT(*) FROM words
+                WHERE user_id = ? AND last_reviewed_at IS NULL
+            """, (user_id,))
+            never_reviewed = cursor.fetchone()[0] or 0
+
+            return {
+                "ready_to_review": ready_to_review,
+                "difficult_words": difficult_words,
+                "never_reviewed": never_reviewed,
+            }
+        except Exception as e:
+            logger.error(f"❌ Error getting SRS stats: {e}")
+            return {"ready_to_review": 0, "difficult_words": 0, "never_reviewed": 0}
+        finally:
+            if conn:
+                conn.close()
+
+    def was_reminder_sent_today(self, user_id: int, mode: str, today_date: str) -> bool:
+        """Проверить, было ли уже отправлено напоминание сегодня.
+        today_date: строка 'YYYY-MM-DD' в часовом поясе бота.
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM reminder_sessions
+                WHERE user_id = ? AND mode = ? AND DATE(created_at) = ?
+            """, (user_id, mode, today_date))
+            return (cursor.fetchone()[0] or 0) > 0
+        except Exception as e:
+            logger.error(f"❌ Error checking reminder_sessions: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def mark_reminder_sent(self, user_id: int, mode: str) -> None:
+        """Записать факт отправки напоминания в БД"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO reminder_sessions (user_id, mode) VALUES (?, ?)
+            """, (user_id, mode))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"❌ Error marking reminder sent: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
     def _validate_time_format(self, time_str: str) -> bool:
         """Валидация формата времени HH:MM"""
         try:

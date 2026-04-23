@@ -62,7 +62,7 @@ async def main() -> None:
         
         # Инициализируем сервисы
         reminder_system = ReminderSystem(db)
-        settings_manager = SettingsManager(db)
+        settings_manager = SettingsManager(db, config.timezone)
         srs_service = SRSService(db)
         quiz_service = QuizService(db, srs_service)
         logger.info("✅ Services initialized")
@@ -83,7 +83,7 @@ async def main() -> None:
         logger.info("✅ Bot commands set")
         
         # Инициализируем планировщик напоминаний
-        scheduler = ReminderScheduler(bot, db, reminder_system)
+        scheduler = ReminderScheduler(bot, db, reminder_system, config.timezone)
         scheduler.start()
         logger.info("✅ Scheduler started")
         
@@ -91,7 +91,7 @@ async def main() -> None:
         words_handler = words.WordsHandler(db)
         quiz_handler = quiz.QuizHandler(quiz_service)
         reminders_handler = reminders.RemindersHandler(reminder_system, db)
-        settings_handler = settings.SettingsHandler(settings_manager, db)
+        settings_handler = settings.SettingsHandler(settings_manager, db, config.timezone)
         callbacks_handler = callbacks.CallbacksHandler(db)
         
         # Регистрируем все handlers
